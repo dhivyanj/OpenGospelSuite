@@ -71,27 +71,43 @@ function parseZefaniaXml(xmlText: string) {
     text: string;
   }> = [];
 
-  const bookRegex = /<BIBLEBOOK\s+[^>]*bnumber="(\d+)"\s+[^>]*bname="([^"]+)"[^>]*>([\s\S]*?)<\/BIBLEBOOK>/gi;
-  const chapterRegex = /<CHAPTER\s+[^>]*cnumber="(\d+)"[^>]*>([\s\S]*?)<\/CHAPTER>/gi;
-  const verseRegex = /<VERS\s+[^>]*vnumber="(\d+)"[^>]*>([\s\S]*?)<\/VERS>/gi;
+  const bookRegex = /<(BIBLEBOOK)\s+([^>]+)>([\s\S]*?)<\/\1>/gi;
+  const chapterRegex = /<(CHAPTER)\s+([^>]+)>([\s\S]*?)<\/\1>/gi;
+  const verseRegex = /<(VERS)\s+([^>]+)>([\s\S]*?)<\/\1>/gi;
 
   let bookMatch;
   while ((bookMatch = bookRegex.exec(xmlText)) !== null) {
-    const bookNum = parseInt(bookMatch[1], 10);
-    const bookName = bookMatch[2];
+    const attributes = bookMatch[2];
     const bookContent = bookMatch[3];
+
+    const numMatch = /bnumber=["'](\d+)["']/i.exec(attributes);
+    const nameMatch = /bname=["']([^"']+)["']/i.exec(attributes);
+    if (!numMatch || !nameMatch) continue;
+
+    const bookNum = parseInt(numMatch[1], 10);
+    const bookName = nameMatch[1];
 
     let chapterMatch;
     chapterRegex.lastIndex = 0;
     while ((chapterMatch = chapterRegex.exec(bookContent)) !== null) {
-      const chapterNum = parseInt(chapterMatch[1], 10);
-      const chapterContent = chapterMatch[2];
+      const chapAttrs = chapterMatch[2];
+      const chapterContent = chapterMatch[3];
+
+      const chapNumMatch = /cnumber=["'](\d+)["']/i.exec(chapAttrs);
+      if (!chapNumMatch) continue;
+
+      const chapterNum = parseInt(chapNumMatch[1], 10);
 
       let verseMatch;
       verseRegex.lastIndex = 0;
       while ((verseMatch = verseRegex.exec(chapterContent)) !== null) {
-        const verseNum = parseInt(verseMatch[1], 10);
-        const rawText = verseMatch[2];
+        const verseAttrs = verseMatch[2];
+        const rawText = verseMatch[3];
+
+        const verseNumMatch = /vnumber=["'](\d+)["']/i.exec(verseAttrs);
+        if (!verseNumMatch) continue;
+
+        const verseNum = parseInt(verseNumMatch[1], 10);
         const text = rawText.replace(/<[^>]+>/g, '').trim();
         verses.push({ bookNum, bookName, chapter: chapterNum, verseNum, text });
       }
@@ -334,11 +350,14 @@ async function listSongs() {
 
 async function listBooks() {
   await initDB();
-  const results: string[] = [];
-  const sql = `SELECT DISTINCT book_name FROM verses ORDER BY book_num;`;
+  const results: Array<{ bookName: string; bookNum: number }> = [];
+  const sql = `SELECT DISTINCT book_name, book_num FROM verses ORDER BY book_num;`;
   for await (const stmt of sqlite3.statements(db, sql)) {
     while (await sqlite3.step(stmt) === SQLite.SQLITE_ROW) {
-      results.push(sqlite3.column_text(stmt, 0));
+      results.push({
+        bookName: sqlite3.column_text(stmt, 0),
+        bookNum: sqlite3.column_int(stmt, 1)
+      });
     }
   }
   return results;
@@ -374,16 +393,34 @@ async function getVerses(bookName: string, chapter: number) {
   return results;
 }
 
+async function exportBibleData() {
+  await initDB();
+  const results: any[] = [];
+  const sql = `SELECT book_name, book_num, chapter, verse_num, text FROM verses ORDER BY book_num, chapter, verse_num;`;
+  for await (const stmt of sqlite3.statements(db, sql)) {
+    while (await sqlite3.step(stmt) === SQLite.SQLITE_ROW) {
+      results.push({
+        bookName: sqlite3.column_text(stmt, 0),
+        bookNum: sqlite3.column_int(stmt, 1),
+        chapter: sqlite3.column_int(stmt, 2),
+        verseNum: sqlite3.column_int(stmt, 3),
+        text: sqlite3.column_text(stmt, 4)
+      });
+    }
+  }
+  return results;
+}
+
 // Handle messages from the main thread
 self.onmessage = async (event) => {
   const { id, type, payload } = event.data;
   
   try {
-    let result: any;
+    let result: any = null;
+    
     switch (type) {
       case 'init':
-        await initDB();
-        result = { success: true };
+        result = await initDB();
         break;
       case 'import_bible':
         const versesCount = await importBible(payload.xmlText);
@@ -410,6 +447,9 @@ self.onmessage = async (event) => {
         break;
       case 'get_verses':
         result = await getVerses(payload.bookName, payload.chapter);
+        break;
+      case 'export_bible':
+        result = await exportBibleData();
         break;
       default:
         throw new Error(`Unknown message type: ${type}`);

@@ -25,6 +25,17 @@
   let textEl = $state<HTMLDivElement | null>(null);
   let fontSize = $state(6); // Font size in vmin
 
+  // Detect script language of the text to apply font mappings
+  function detectLanguage(t: string): string {
+    if (/[\u0b80-\u0bff]/.test(t)) return 'Tamil';
+    return 'Default';
+  }
+
+  const detectedLang = $derived(detectLanguage(text));
+  const activeFontFamily = $derived(
+    theme.fontMapping?.[detectedLang] || theme.fontFamily
+  );
+
   // Auto-fit text sizing
   $effect(() => {
     // Run whenever the text or theme changes
@@ -39,7 +50,7 @@
       let currentSize = maxFont;
       const containerWidth = containerEl.clientWidth;
       const containerHeight = containerEl.clientHeight;
-      const paddingSafety = isPreview ? 8 : 40; // Safetymargin based on preview or full view
+      const paddingSafety = isPreview ? 8 : 40; // Safety margin based on preview or full view
 
       for (let i = 0; i < 25; i++) {
         const textWidth = textEl.scrollWidth;
@@ -60,7 +71,7 @@
     }, 20);
   });
 
-  // Convert lines to paragraph paragraphs
+  // Convert lines to paragraph arrays
   const processedLines = $derived(
     text.split('\n').map(line => line.trim())
   );
@@ -91,66 +102,150 @@
 <div
   bind:this={containerEl}
   class="slide-container"
-  style:background={blackout ? '#000000' : theme.bgGradient}
-  style:font-family={theme.fontFamily}
+  class:lower-third-layout={theme.layout === 'lowerthird'}
+  style:background={blackout ? '#000000' : (theme.layout === 'lowerthird' ? 'transparent' : theme.bgGradient)}
+  style:font-family={activeFontFamily}
   class:preview={isPreview}
 >
   <!-- Background is black when blackout is active -->
   {#if !blackout}
+    <!-- Background Video / Image (disabled in lowerthird layout) -->
+    {#if theme.layout !== 'lowerthird'}
+      {#if theme.bgVideo}
+        <!-- svelte-ignore a11y_media_has_caption -->
+        <video class="bg-media" src={theme.bgVideo} autoplay loop muted></video>
+      {/if}
+      {#if theme.bgImage && !theme.bgVideo}
+        <div class="bg-media bg-image" style="background-image: url({theme.bgImage})"></div>
+      {/if}
+    {/if}
+
     <!-- Slide Text Layer -->
     <div 
       class="text-wrapper"
+      class:lower-third-wrapper={theme.layout === 'lowerthird'}
       style:justify-content={
+        theme.layout === 'lowerthird' ? 'flex-end' :
         theme.verticalAlignment === 'top' ? 'flex-start' : 
         theme.verticalAlignment === 'bottom' ? 'flex-end' : 'center'
       }
       style:align-items={
+        theme.layout === 'lowerthird' ? 'center' :
         theme.alignment === 'left' ? 'flex-start' : 
         theme.alignment === 'right' ? 'flex-end' : 'center'
       }
-      style:text-align={theme.alignment}
+      style:text-align={theme.layout === 'lowerthird' ? 'center' : theme.alignment}
     >
       {#if !clearText && text}
         {#key text}
-          {#if theme.transition === 'slide'}
-            <div
-              bind:this={textEl}
-              class="slide-text"
-              style:color={theme.textColor}
-              style:font-size={isPreview ? `${fontSize * 0.4}rem` : `${fontSize}vmin`}
-              in:fly|global={transitionProps().in}
-              out:fly|global={transitionProps().out}
-            >
-              {#each processedLines as line}
-                <p class="slide-line">{line}</p>
-              {/each}
-            </div>
-          {:else if theme.transition === 'zoom'}
-            <div
-              bind:this={textEl}
-              class="slide-text"
-              style:color={theme.textColor}
-              style:font-size={isPreview ? `${fontSize * 0.4}rem` : `${fontSize}vmin`}
-              in:scale|global={transitionProps().in}
-              out:scale|global={transitionProps().out}
-            >
-              {#each processedLines as line}
-                <p class="slide-line">{line}</p>
-              {/each}
+          {#if theme.layout === 'lowerthird'}
+            <!-- Lower Third overlay container -->
+            <div class="lower-third-backdrop">
+              {#if theme.transition === 'slide'}
+                <div
+                  bind:this={textEl}
+                  class="slide-text"
+                  style:color={theme.textColor}
+                  style:font-size={isPreview ? `${fontSize * 0.35}rem` : `${fontSize * 0.9}vmin`}
+                  in:fly|global={transitionProps().in}
+                  out:fly|global={transitionProps().out}
+                >
+                  {#each processedLines as line}
+                    <p class="slide-line">{line}</p>
+                  {/each}
+                </div>
+              {:else if theme.transition === 'zoom'}
+                <div
+                  bind:this={textEl}
+                  class="slide-text"
+                  style:color={theme.textColor}
+                  style:font-size={isPreview ? `${fontSize * 0.35}rem` : `${fontSize * 0.9}vmin`}
+                  in:scale|global={transitionProps().in}
+                  out:scale|global={transitionProps().out}
+                >
+                  {#each processedLines as line}
+                    <p class="slide-line">{line}</p>
+                  {/each}
+                </div>
+              {:else if theme.transition === 'none'}
+                <div
+                  bind:this={textEl}
+                  class="slide-text"
+                  style:color={theme.textColor}
+                  style:font-size={isPreview ? `${fontSize * 0.35}rem` : `${fontSize * 0.9}vmin`}
+                >
+                  {#each processedLines as line}
+                    <p class="slide-line">{line}</p>
+                  {/each}
+                </div>
+              {:else}
+                <div
+                  bind:this={textEl}
+                  class="slide-text"
+                  style:color={theme.textColor}
+                  style:font-size={isPreview ? `${fontSize * 0.35}rem` : `${fontSize * 0.9}vmin`}
+                  in:fade|global={transitionProps().in}
+                  out:fade|global={transitionProps().out}
+                >
+                  {#each processedLines as line}
+                    <p class="slide-line">{line}</p>
+                  {/each}
+                </div>
+              {/if}
             </div>
           {:else}
-            <div
-              bind:this={textEl}
-              class="slide-text"
-              style:color={theme.textColor}
-              style:font-size={isPreview ? `${fontSize * 0.4}rem` : `${fontSize}vmin`}
-              in:fade|global={transitionProps().in}
-              out:fade|global={transitionProps().out}
-            >
-              {#each processedLines as line}
-                <p class="slide-line">{line}</p>
-              {/each}
-            </div>
+            <!-- Standard presentation container -->
+            {#if theme.transition === 'slide'}
+              <div
+                bind:this={textEl}
+                class="slide-text"
+                style:color={theme.textColor}
+                style:font-size={isPreview ? `${fontSize * 0.4}rem` : `${fontSize}vmin`}
+                in:fly|global={transitionProps().in}
+                out:fly|global={transitionProps().out}
+              >
+                {#each processedLines as line}
+                  <p class="slide-line">{line}</p>
+                {/each}
+              </div>
+            {:else if theme.transition === 'zoom'}
+              <div
+                bind:this={textEl}
+                class="slide-text"
+                style:color={theme.textColor}
+                style:font-size={isPreview ? `${fontSize * 0.4}rem` : `${fontSize}vmin`}
+                in:scale|global={transitionProps().in}
+                out:scale|global={transitionProps().out}
+              >
+                {#each processedLines as line}
+                  <p class="slide-line">{line}</p>
+                {/each}
+              </div>
+            {:else if theme.transition === 'none'}
+              <div
+                bind:this={textEl}
+                class="slide-text"
+                style:color={theme.textColor}
+                style:font-size={isPreview ? `${fontSize * 0.4}rem` : `${fontSize}vmin`}
+              >
+                {#each processedLines as line}
+                  <p class="slide-line">{line}</p>
+                {/each}
+              </div>
+            {:else}
+              <div
+                bind:this={textEl}
+                class="slide-text"
+                style:color={theme.textColor}
+                style:font-size={isPreview ? `${fontSize * 0.4}rem` : `${fontSize}vmin`}
+                in:fade|global={transitionProps().in}
+                out:fade|global={transitionProps().out}
+              >
+                {#each processedLines as line}
+                  <p class="slide-line">{line}</p>
+                {/each}
+              </div>
+            {/if}
           {/if}
         {/key}
       {/if}
@@ -188,6 +283,27 @@
     aspect-ratio: 16 / 9;
   }
 
+  .slide-container.lower-third-layout {
+    background: transparent !important;
+  }
+
+  .bg-media {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    z-index: 0;
+    pointer-events: none;
+  }
+
+  .bg-image {
+    background-size: cover;
+    background-position: center;
+    background-repeat: no-repeat;
+  }
+
   .text-wrapper {
     position: absolute;
     top: 0;
@@ -199,6 +315,23 @@
     flex-direction: column;
     box-sizing: border-box;
     overflow: hidden;
+    z-index: 10;
+  }
+
+  .text-wrapper.lower-third-wrapper {
+    justify-content: flex-end !important;
+    align-items: center !important;
+    padding-bottom: 5vh !important;
+  }
+
+  .lower-third-backdrop {
+    background: rgba(15, 23, 42, 0.85); /* Slick dark slate overlay */
+    border-radius: 8px;
+    padding: 1.25rem 2.5rem;
+    border-left: 5px solid #10b981;
+    max-width: 85%;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
+    display: inline-block;
   }
 
   .slide-text {

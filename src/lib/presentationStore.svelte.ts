@@ -5,8 +5,12 @@ export interface Theme {
   fontFamily: string;
   alignment: 'center' | 'left' | 'right';
   verticalAlignment: 'center' | 'top' | 'bottom';
-  transition: 'fade' | 'slide' | 'zoom' | 'crossfade';
+  transition: 'fade' | 'slide' | 'zoom' | 'crossfade' | 'none';
   fontSizeMax: number; // in vmin
+  bgImage?: string;
+  bgVideo?: string;
+  layout?: 'fullscreen' | 'lowerthird';
+  fontMapping?: Record<string, string>;
 }
 
 export interface PresentationState {

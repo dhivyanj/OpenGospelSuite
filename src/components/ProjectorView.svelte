@@ -25,7 +25,7 @@
   });
 </script>
 
-<div class="projector-view">
+<div class="projector-view" class:lower-third-bg={currentTheme.layout === 'lowerthird'}>
   <SlideRenderer 
     text={currentSlideText} 
     theme={currentTheme} 
@@ -43,5 +43,9 @@
     margin: 0;
     padding: 0;
     background: #000000;
+  }
+
+  .projector-view.lower-third-bg {
+    background: transparent !important;
   }
 </style>

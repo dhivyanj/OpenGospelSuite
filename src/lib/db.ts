@@ -60,7 +60,7 @@ export const dbClient = {
     return sendToWorker('list_songs');
   },
   
-  listBooks(): Promise<string[]> {
+  listBooks(): Promise<Array<{ bookName: string; bookNum: number }>> {
     return sendToWorker('list_books');
   },
   
@@ -70,5 +70,9 @@ export const dbClient = {
   
   getVerses(bookName: string, chapter: number): Promise<Array<{ verseNum: number; text: string }>> {
     return sendToWorker('get_verses', { bookName, chapter });
+  },
+  
+  exportBible(): Promise<any> {
+    return sendToWorker('export_bible');
   }
 };

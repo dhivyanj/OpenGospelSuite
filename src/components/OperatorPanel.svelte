@@ -7,9 +7,13 @@
   import SlideRenderer from './SlideRenderer.svelte';
 
   // Core State
-  let activeTab = $state<'songs' | 'bibles' | 'import' | 'custom'>('songs');
+  let activeTab = $state<'songs' | 'bibles' | 'presentation' | 'settings'>('songs');
   let darkMode = $state(true);
   let rightTab = $state<'live' | 'details'>('live');
+  
+  // Embedded Panels inside Schedule
+  let showCustomSlidePanel = $state(false);
+  let showImportPanel = $state(false);
 
   // Songs Search & Subtab State
   let songSubTab = $state<'find' | 'schedule'>('find');
@@ -22,7 +26,7 @@
   // Bibles State
   let bibleQuery = $state('');
   let bibleSearchResults = $state<any[]>([]);
-  let books = $state<string[]>([]);
+  let books = $state<Array<{ bookName: string; bookNum: number }>>([]);
   let selectedBook = $state('');
   let chapters = $state<number[]>([]);
   let selectedChapter = $state<number | null>(null);
@@ -56,6 +60,33 @@
 
   let newAlertText = $state('');
 
+  // Settings & Subtabs State
+  let settingsSubTab = $state<'songs' | 'bibles' | 'appearance' | 'general'>('songs');
+  let selectedSongLanguage = $state('All');
+  let selectedBibleLanguage = $state('All');
+  let googleFontInput = $state('');
+  
+  // Font Mapping State
+  let fontMappingTamil = $state('Latha');
+  let fontMappingDefault = $state('Outfit');
+  let importedFonts = $state<string[]>(['Outfit', 'Inter', 'Roboto', 'Arial', 'Latha']);
+
+  // DB Statistics state
+  let dbStats = $state({ biblesCount: 0, songsCount: 0 });
+
+  // Compute remote and projector links dynamically
+  const remoteUrl = $derived(() => {
+    const host = window.location.hostname || 'localhost';
+    const port = window.location.port || '3000';
+    return `http://${host}:${port}/#/remote`;
+  });
+
+  const projectorUrl = $derived(() => {
+    const host = window.location.hostname || 'localhost';
+    const port = window.location.port || '3000';
+    return `http://${host}:${port}/#/projector`;
+  });
+
   // Track light/dark mode changes in HTML class
   $effect(() => {
     if (darkMode) {
@@ -65,6 +96,145 @@
       document.documentElement.classList.add('light-theme');
       document.documentElement.classList.remove('dark-theme');
     }
+  });
+
+  // Font mapping is applied explicitly via updateFontMapping() called from event handlers.
+  // Song language filtering is triggered by the select onchange handler.
+  // DB stats are fetched when the settings tab is first selected via onSettingsTabClick().
+
+  function updateFontMapping() {
+    if (presentationStore.theme) {
+      presentationStore.setTheme({
+        ...presentationStore.theme,
+        fontMapping: {
+          Tamil: fontMappingTamil,
+          Default: fontMappingDefault
+        }
+      });
+    }
+  }
+
+  function onSettingsTabClick() {
+    activeTab = 'settings';
+    fetchDbStats();
+  }
+
+  async function fetchDbStats() {
+    try {
+      const allSongs = await dbClient.listSongs();
+      dbStats.songsCount = allSongs.length;
+      dbStats.biblesCount = books.length > 0 ? 1 : 0;
+    } catch (e) {
+      console.warn("Failed to fetch database stats:", e);
+    }
+  }
+
+  // Google fonts dynamic loading
+  function loadGoogleFont(fontName: string) {
+    if (!fontName) return;
+    const linkId = `gfont-${fontName.toLowerCase().replace(/\s+/g, '-')}`;
+    if (document.getElementById(linkId)) return;
+    
+    const link = document.createElement('link');
+    link.id = linkId;
+    link.rel = 'stylesheet';
+    link.href = `https://fonts.googleapis.com/css2?family=${fontName.replace(/\s+/g, '+')}:wght@400;700&display=swap`;
+    document.head.appendChild(link);
+  }
+
+  function addGoogleFont() {
+    const font = googleFontInput.trim();
+    if (font && !importedFonts.includes(font)) {
+      loadGoogleFont(font);
+      importedFonts = [...importedFonts, font];
+      localStorage.setItem('opengospel_imported_fonts', JSON.stringify(importedFonts));
+      googleFontInput = '';
+    }
+  }
+
+  // Image/Video background helpers
+  function handleBgImageUpload(e: Event) {
+    const file = (e.target as HTMLInputElement).files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const base64 = event.target?.result as string;
+      presentationStore.setTheme({
+        ...presentationStore.theme,
+        bgImage: base64,
+        bgVideo: undefined
+      });
+    };
+    reader.readAsDataURL(file);
+  }
+
+  function handleBgVideoUpload(e: Event) {
+    const file = (e.target as HTMLInputElement).files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const base64 = event.target?.result as string;
+      presentationStore.setTheme({
+        ...presentationStore.theme,
+        bgVideo: base64,
+        bgImage: undefined
+      });
+    };
+    reader.readAsDataURL(file);
+  }
+
+  function clearBgMedia() {
+    presentationStore.setTheme({
+      ...presentationStore.theme,
+      bgImage: undefined,
+      bgVideo: undefined
+    });
+  }
+
+  // DB Backup exports
+  async function exportSongs() {
+    try {
+      const songs = await dbClient.listSongs();
+      const json = JSON.stringify(songs, null, 2);
+      const blob = new Blob([json], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `opengospel_songs_${new Date().toISOString().split('T')[0]}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      alert("Failed to export songs backup: " + e);
+    }
+  }
+
+  async function exportBible() {
+    try {
+      const data = await dbClient.exportBible();
+      const json = JSON.stringify(data, null, 2);
+      const blob = new Blob([json], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `opengospel_bible_${new Date().toISOString().split('T')[0]}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      alert("Failed to export Bible backup: " + e);
+    }
+  }
+
+  const filteredBooks = $derived(() => {
+    if (selectedBibleLanguage === 'Tamil') {
+      return books.filter(b => /[\u0b80-\u0bff]/.test(b.bookName));
+    } else if (selectedBibleLanguage === 'English') {
+      return books.filter(b => !/[\u0b80-\u0bff]/.test(b.bookName));
+    }
+    return books;
   });
 
   onMount(async () => {
@@ -80,7 +250,14 @@
   // Song operations
   async function searchSongs() {
     try {
-      songResults = await dbClient.searchSongs(songQuery);
+      const results = await dbClient.searchSongs(songQuery);
+      if (selectedSongLanguage === 'Tamil') {
+        songResults = results.filter(song => /[\u0b80-\u0bff]/.test(song.lyrics) || /[\u0b80-\u0bff]/.test(song.title));
+      } else if (selectedSongLanguage === 'English') {
+        songResults = results.filter(song => !(/[\u0b80-\u0bff]/.test(song.lyrics) || /[\u0b80-\u0bff]/.test(song.title)));
+      } else {
+        songResults = results;
+      }
     } catch (err) {
       console.error('Song search failed:', err);
     }
@@ -274,7 +451,9 @@
       const file = files[i];
       const text = await file.text();
       
-      if (text.includes('<XMLBIBLE>')) {
+      const lowerText = text.toLowerCase();
+      
+      if (lowerText.includes('<xmlbible') || lowerText.includes('<biblebook') || lowerText.includes('<xml_bible') || lowerText.includes('<vers')) {
         try {
           const count = await dbClient.importBible(text);
           biblesImported++;
@@ -283,7 +462,7 @@
         } catch (e: any) {
           importStatus = `Failed importing Bible: ${e.message}`;
         }
-      } else if (text.includes('<song')) {
+      } else if (lowerText.includes('<song')) {
         try {
           const title = await dbClient.importSong(text);
           songsImported++;
@@ -457,8 +636,8 @@
     <div class="tabs">
       <button class:active={activeTab === 'songs'} onclick={() => activeTab = 'songs'}>Songs</button>
       <button class:active={activeTab === 'bibles'} onclick={() => activeTab = 'bibles'}>Bible</button>
-      <button class:active={activeTab === 'custom'} onclick={() => activeTab = 'custom'}>Custom Slides</button>
-      <button class:active={activeTab === 'import'} onclick={() => activeTab = 'import'}>Import XML</button>
+      <button class:active={activeTab === 'presentation'} onclick={() => activeTab = 'presentation'}>Presentation</button>
+      <button class:active={activeTab === 'settings'} onclick={onSettingsTabClick}>Settings</button>
     </div>
 
     <div class="tab-content">
@@ -607,6 +786,66 @@
                     {/each}
                   {/if}
                 </div>
+
+                <div class="schedule-embedded-controls">
+                  <!-- Collapsible Add Custom Slide Section -->
+                  <div class="collapsible-section">
+                    <button 
+                      class="section-toggle-btn" 
+                      onclick={() => showCustomSlidePanel = !showCustomSlidePanel}
+                    >
+                      {showCustomSlidePanel ? '▼ Hide Custom Slide Form' : '▶ Create Custom Slide'}
+                    </button>
+                    {#if showCustomSlidePanel}
+                      <div class="embedded-form-card">
+                        <div class="form-group-embedded">
+                          <input type="text" placeholder="Title (e.g. Announcements)" bind:value={customTitle} />
+                          <input type="text" placeholder="Subtitle / Sub-header" bind:value={customSubtitle} />
+                        </div>
+                        <div class="form-group-embedded">
+                          <textarea 
+                            placeholder="Slide text... Double newline separates slides." 
+                            bind:value={customText}
+                            rows="3"
+                          ></textarea>
+                        </div>
+                        <div class="embedded-form-actions">
+                          <button class="live-btn mini-btn" onclick={customGoLive} disabled={!customTitle || !customText}>Go Live</button>
+                          <button class="add-btn mini-btn" onclick={customAddToPlaylist} disabled={!customTitle || !customText}>+ Schedule</button>
+                        </div>
+                      </div>
+                    {/if}
+                  </div>
+
+                  <!-- Collapsible Import XML Section -->
+                  <div class="collapsible-section">
+                    <button 
+                      class="section-toggle-btn" 
+                      onclick={() => showImportPanel = !showImportPanel}
+                    >
+                      {showImportPanel ? '▼ Hide Import Area' : '▶ Import XML Bibles / Songs'}
+                    </button>
+                    {#if showImportPanel}
+                      <div class="embedded-form-card">
+                        <!-- svelte-ignore a11y_no_static_element_interactions -->
+                        <div 
+                          class="drop-zone mini-drop-zone"
+                          class:dragover={isDragging}
+                          ondragover={(e) => { e.preventDefault(); isDragging = true; }}
+                          ondragleave={() => isDragging = false}
+                          ondrop={handleFileDrop}
+                        >
+                          <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/></svg>
+                          <p>Drag files here or click to browse</p>
+                          <input type="file" multiple accept=".xml" onchange={handleFileSelect} />
+                        </div>
+                        {#if importStatus}
+                          <div class="import-status-mini">{importStatus}</div>
+                        {/if}
+                      </div>
+                    {/if}
+                  </div>
+                </div>
               </div>
             </div>
           {/if}
@@ -631,8 +870,8 @@
               <label for="book-select">Book:</label>
               <select id="book-select" bind:value={selectedBook} onchange={onBookChange}>
                 <option value="">-- Select Book --</option>
-                {#each books as book}
-                  <option value={book}>{book}</option>
+                {#each filteredBooks() as book}
+                  <option value={book.bookName}>{book.bookName}</option>
                 {/each}
               </select>
             </div>
@@ -702,54 +941,239 @@
         </div>
       {/if}
 
-      <!-- CUSTOM SLIDES TAB -->
-      {#if activeTab === 'custom'}
-        <div class="custom-container">
-          <div class="form-group">
-            <label for="custom-title-input">Presentation Title:</label>
-            <input id="custom-title-input" type="text" placeholder="e.g. Sermon Slides, Announcements" bind:value={customTitle} />
-          </div>
-          <div class="form-group">
-            <label for="custom-subtitle-input">Subtitle / Category:</label>
-            <input id="custom-subtitle-input" type="text" placeholder="e.g. Pastor John Doe" bind:value={customSubtitle} />
-          </div>
-          <div class="form-group textarea-group">
-            <label for="custom-text-input">Slide Contents (use double-newline to separate slides):</label>
-            <textarea 
-              id="custom-text-input"
-              placeholder="First Slide Text goes here.&#10;&#10;Second Slide Text goes here after two line breaks." 
-              bind:value={customText}
-            ></textarea>
-          </div>
-          <div class="custom-actions">
-            <button class="live-btn large-btn" onclick={customGoLive} disabled={!customTitle || !customText}>Go Live Now</button>
-            <button class="add-btn large-btn" onclick={customAddToPlaylist} disabled={!customTitle || !customText}>Add to Schedule</button>
+      <!-- PRESENTATION TAB -->
+      {#if activeTab === 'presentation'}
+        <div class="presentation-config-container">
+          <h4>Presentation Settings</h4>
+          
+          <div class="config-grid">
+            <!-- Background Asset -->
+            <div class="config-card">
+              <h5>Background Asset</h5>
+              <div class="media-preview-box">
+                {#if currentTheme.bgVideo}
+                  <div class="media-badge video">Video Active</div>
+                  <span class="file-info-text">Background Video Loaded</span>
+                {:else if currentTheme.bgImage}
+                  <img src={currentTheme.bgImage} alt="Background Preview" class="img-preview" />
+                  <span class="file-info-text">Background Image Loaded</span>
+                {:else}
+                  <div class="no-media-text">No Custom Background Media</div>
+                {/if}
+              </div>
+              <div class="media-upload-actions">
+                <label class="file-upload-btn">
+                  <span>📷 Image</span>
+                  <input type="file" accept="image/*" onchange={handleBgImageUpload} />
+                </label>
+                <label class="file-upload-btn">
+                  <span>🎥 Video</span>
+                  <input type="file" accept="video/*" onchange={handleBgVideoUpload} />
+                </label>
+                <button class="clear-btn-red" onclick={clearBgMedia} disabled={!currentTheme.bgImage && !currentTheme.bgVideo}>Clear</button>
+              </div>
+            </div>
+
+            <!-- Transition selector -->
+            <div class="config-card">
+              <h5>Slide Transitions</h5>
+              <div class="form-group-horizontal">
+                <label for="transition-select">Text Animation:</label>
+                <select 
+                  id="transition-select" 
+                  value={currentTheme.transition} 
+                  onchange={(e) => {
+                    presentationStore.setTheme({
+                      ...currentTheme,
+                      transition: (e.target as HTMLSelectElement).value as any
+                    });
+                  }}
+                >
+                  <option value="none">None (Instant)</option>
+                  <option value="fade">Fade In / Out</option>
+                  <option value="slide">Slide In / Out</option>
+                  <option value="zoom">Zoom Scale</option>
+                </select>
+              </div>
+            </div>
+
+            <!-- OBS / Lower Third Layout -->
+            <div class="config-card">
+              <h5>OBS / Broadcast Layout</h5>
+              <div class="form-group-horizontal">
+                <label for="layout-select">Display Mode:</label>
+                <select 
+                  id="layout-select" 
+                  value={currentTheme.layout || 'fullscreen'} 
+                  onchange={(e) => {
+                    presentationStore.setTheme({
+                      ...currentTheme,
+                      layout: (e.target as HTMLSelectElement).value as any
+                    });
+                  }}
+                >
+                  <option value="fullscreen">Full Screen Presentation</option>
+                  <option value="lowerthird">Transparent Lower Third (OBS overlay)</option>
+                </select>
+              </div>
+              
+              {#if currentTheme.layout === 'lowerthird'}
+                <div class="obs-info-box">
+                  <p>Copy this URL for your OBS Browser Source:</p>
+                  <div class="copy-url-row">
+                    <input type="text" readonly value={projectorUrl()} />
+                    <button class="mini-copy-btn" onclick={() => {
+                      navigator.clipboard.writeText(projectorUrl());
+                      alert("Projector link copied to clipboard!");
+                    }}>Copy</button>
+                  </div>
+                </div>
+              {/if}
+            </div>
+
+            <!-- Language display fonts mapping -->
+            <div class="config-card">
+              <h5>Display Font Mappings</h5>
+              <div class="form-group-horizontal">
+                <label for="tamil-font-input">Tamil Font:</label>
+                <select id="tamil-font-input" bind:value={fontMappingTamil} onchange={updateFontMapping}>
+                  {#each importedFonts as font}
+                    <option value={font}>{font}</option>
+                  {/each}
+                </select>
+              </div>
+              <div class="form-group-horizontal">
+                <label for="default-font-input">Default Font:</label>
+                <select id="default-font-input" bind:value={fontMappingDefault} onchange={updateFontMapping}>
+                  {#each importedFonts as font}
+                    <option value={font}>{font}</option>
+                  {/each}
+                </select>
+              </div>
+            </div>
+
+            <!-- Remote usage & QR Code -->
+            <div class="config-card full-width">
+              <h5>Remote Control Interface</h5>
+              <div class="remote-control-split">
+                <div class="remote-info">
+                  <p>Scan the QR code or open the link on any local network device to control slides remotely:</p>
+                  <a href={remoteUrl()} target="_blank" class="remote-link">{remoteUrl()}</a>
+                </div>
+                <div class="qr-code-box">
+                  <img 
+                    src="https://api.qrserver.com/v1/create-qr-code/?size=130x130&data={encodeURIComponent(remoteUrl())}" 
+                    alt="Remote Access QR Code" 
+                    class="qr-code-img"
+                  />
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       {/if}
 
-      <!-- IMPORT TAB -->
-      {#if activeTab === 'import'}
-        <div class="import-container">
-          <!-- svelte-ignore a11y_no_static_element_interactions -->
-          <div 
-            class="drop-zone"
-            class:dragover={isDragging}
-            ondragover={(e) => { e.preventDefault(); isDragging = true; }}
-            ondragleave={() => isDragging = false}
-            ondrop={handleFileDrop}
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/></svg>
-            <p>Drag and drop <strong>Zefania XML Bibles</strong> or <strong>OpenLyrics XML Songs</strong> here</p>
-            <span>or click to browse local files</span>
-            <input type="file" multiple accept=".xml" onchange={handleFileSelect} />
+      <!-- SETTINGS TAB -->
+      {#if activeTab === 'settings'}
+        <div class="settings-container">
+          <div class="settings-subtabs">
+            <button class:active={settingsSubTab === 'songs'} onclick={() => settingsSubTab = 'songs'}>Songs</button>
+            <button class:active={settingsSubTab === 'bibles'} onclick={() => settingsSubTab = 'bibles'}>Bibles</button>
+            <button class:active={settingsSubTab === 'appearance'} onclick={() => settingsSubTab = 'appearance'}>Appearance</button>
+            <button class:active={settingsSubTab === 'general'} onclick={() => settingsSubTab = 'general'}>General</button>
           </div>
-          
-          {#if importStatus}
-            <div class="import-status">
-              <p>{importStatus}</p>
-            </div>
-          {/if}
+
+          <div class="settings-subtab-content">
+            <!-- Songs Settings -->
+            {#if settingsSubTab === 'songs'}
+              <div class="settings-card">
+                <h5>Song Filters</h5>
+                <div class="form-group-horizontal">
+                  <label for="song-lang-select">Filter by Language:</label>
+                  <select id="song-lang-select" bind:value={selectedSongLanguage} onchange={() => searchSongs()}>
+                    <option value="All">All Songs</option>
+                    <option value="English">English</option>
+                    <option value="Tamil">Tamil</option>
+                  </select>
+                </div>
+              </div>
+            {/if}
+
+            <!-- Bibles Settings -->
+            {#if settingsSubTab === 'bibles'}
+              <div class="settings-card">
+                <h5>Bible Filters</h5>
+                <div class="form-group-horizontal">
+                  <label for="bible-lang-select">Filter Books by Language:</label>
+                  <select id="bible-lang-select" bind:value={selectedBibleLanguage}>
+                    <option value="All">All Books</option>
+                    <option value="English">English</option>
+                    <option value="Tamil">Tamil</option>
+                  </select>
+                </div>
+              </div>
+            {/if}
+
+            <!-- Appearance Settings -->
+            {#if settingsSubTab === 'appearance'}
+              <div class="settings-card">
+                <h5>Application UI Aesthetics</h5>
+                <div class="form-group-horizontal">
+                  <label for="theme-dark-toggle">Theme Mode:</label>
+                  <button id="theme-dark-toggle" class="toggle-switch-btn" onclick={() => darkMode = !darkMode}>
+                    {darkMode ? '🌙 Dark Mode' : '☀️ Light Mode'}
+                  </button>
+                </div>
+              </div>
+
+              <div class="settings-card">
+                <h5>Import Google Web Fonts</h5>
+                <p class="settings-help">Type the exact Google Font name to load it dynamically into the presentation system.</p>
+                <div class="font-search-row">
+                  <input type="text" placeholder="e.g. DM Sans, Playfair Display, Inter" bind:value={googleFontInput} />
+                  <button class="primary-btn" onclick={addGoogleFont}>Import Font</button>
+                </div>
+                <div class="loaded-fonts-list">
+                  <h6>Available Display Fonts:</h6>
+                  <div class="chips-container">
+                    {#each importedFonts as font}
+                      <span class="font-chip">{font}</span>
+                    {/each}
+                  </div>
+                </div>
+              </div>
+            {/if}
+
+            <!-- General Settings -->
+            {#if settingsSubTab === 'general'}
+              <div class="settings-card">
+                <h5>Database Statistics</h5>
+                <div class="db-stats-grid">
+                  <div class="stat-item">
+                    <span class="stat-val">{dbStats.songsCount}</span>
+                    <span class="stat-lbl">Songs Loaded</span>
+                  </div>
+                  <div class="stat-item">
+                    <span class="stat-val">{dbStats.biblesCount}</span>
+                    <span class="stat-lbl">Bibles Loaded</span>
+                  </div>
+                </div>
+              </div>
+
+              <div class="settings-card">
+                <h5>Backup and Data Exports</h5>
+                <p class="settings-help">Export your database files as portable JSON configuration backups.</p>
+                <div class="backup-actions">
+                  <button class="export-btn" onclick={exportSongs} disabled={dbStats.songsCount === 0}>
+                    📥 Export Songs List
+                  </button>
+                  <button class="export-btn" onclick={exportBible} disabled={dbStats.biblesCount === 0}>
+                    📥 Export Bible Verses
+                  </button>
+                </div>
+              </div>
+            {/if}
+          </div>
         </div>
       {/if}
     </div>
@@ -1706,61 +2130,7 @@
     font-size: 0.95rem;
   }
 
-  /* Custom Container */
-  .custom-container {
-    padding: 1.5rem;
-    display: flex;
-    flex-direction: column;
-    gap: 1.25rem;
-    overflow-y: auto;
-    height: 100%;
-    box-sizing: border-box;
-  }
-
-  .form-group {
-    display: flex;
-    flex-direction: column;
-    gap: 0.4rem;
-  }
-
-  .form-group label {
-    font-size: 0.85rem;
-    font-weight: 700;
-    color: var(--text-secondary);
-  }
-
-  .form-group input, .form-group textarea {
-    width: 100%;
-    min-height: 44px;
-    background: var(--input-bg);
-    border: 1px solid var(--border-color);
-    border-radius: 6px;
-    padding: 0.75rem;
-    color: var(--text-primary);
-    font-size: 0.95rem;
-    box-sizing: border-box;
-  }
-
-  .form-group textarea {
-    min-height: 150px;
-    font-family: inherit;
-    resize: none;
-  }
-
-  .custom-actions {
-    display: flex;
-    gap: 0.75rem;
-    justify-content: flex-end;
-  }
-
-  /* Import tab */
-  .import-container {
-    padding: 1.5rem;
-    display: flex;
-    flex-direction: column;
-    gap: 1rem;
-  }
-
+  /* Drop Zone (used by embedded schedule import) */
   .drop-zone {
     border: 2px dashed var(--border-color);
     border-radius: 8px;
@@ -1784,15 +2154,6 @@
     height: 100%;
     opacity: 0;
     cursor: pointer;
-  }
-
-  .import-status {
-    background: var(--accent-bg);
-    border: 1px solid var(--accent-color);
-    padding: 0.75rem;
-    border-radius: 6px;
-    color: var(--text-primary);
-    font-size: 0.85rem;
   }
 
   /* Right column presentation panel */
@@ -1932,6 +2293,7 @@
     text-overflow: ellipsis;
     display: -webkit-box;
     -webkit-line-clamp: 2;
+    line-clamp: 2;
     -webkit-box-orient: vertical;
   }
 
@@ -2066,5 +2428,527 @@
       margin-left: 0;
       margin-top: 0.5rem;
     }
+  }
+
+  /* Embedded Controls under Schedule */
+  .schedule-embedded-controls {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    padding: 0.75rem;
+    background: var(--bg-tertiary);
+    border-top: 1px solid var(--border-color);
+  }
+
+  .collapsible-section {
+    display: flex;
+    flex-direction: column;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    overflow: hidden;
+  }
+
+  .section-toggle-btn {
+    background: var(--bg-secondary);
+    border: none;
+    color: var(--text-primary);
+    padding: 0.5rem 0.75rem;
+    font-size: 0.8rem;
+    font-weight: 700;
+    text-align: left;
+    cursor: pointer;
+    transition: background 0.2s;
+  }
+
+  .section-toggle-btn:hover {
+    background: var(--border-color);
+  }
+
+  .embedded-form-card {
+    padding: 0.75rem;
+    background: var(--bg-primary);
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+
+  .form-group-embedded {
+    display: flex;
+    gap: 0.5rem;
+  }
+
+  .form-group-embedded input,
+  .form-group-embedded textarea {
+    flex: 1;
+    background: var(--input-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    padding: 0.4rem 0.6rem;
+    color: var(--text-primary);
+    font-size: 0.85rem;
+    box-sizing: border-box;
+  }
+
+  .form-group-embedded textarea {
+    resize: none;
+    font-family: inherit;
+  }
+
+  .embedded-form-actions {
+    display: flex;
+    gap: 0.5rem;
+    justify-content: flex-end;
+  }
+
+  .mini-btn {
+    padding: 0.35rem 0.75rem !important;
+    font-size: 0.75rem !important;
+    min-height: auto !important;
+  }
+
+  .mini-drop-zone {
+    padding: 1rem 0.5rem !important;
+  }
+
+  .mini-drop-zone p {
+    font-size: 0.75rem !important;
+    margin: 0.25rem 0 0 0 !important;
+  }
+
+  .import-status-mini {
+    font-size: 0.75rem;
+    color: var(--accent-color);
+    margin-top: 0.25rem;
+    text-align: center;
+  }
+
+  /* Presentation Config Styles */
+  .presentation-config-container {
+    padding: 1.5rem;
+    display: flex;
+    flex-direction: column;
+    gap: 1.25rem;
+    overflow-y: auto;
+    height: 100%;
+    box-sizing: border-box;
+  }
+
+  .presentation-config-container h4 {
+    margin: 0;
+    font-size: 1.25rem;
+    font-weight: 800;
+  }
+
+  .config-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1rem;
+  }
+
+  @media (max-width: 768px) {
+    .config-grid {
+      grid-template-columns: 1fr;
+    }
+  }
+
+  .config-card {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+  }
+
+  .config-card.full-width {
+    grid-column: 1 / -1;
+  }
+
+  .config-card h5 {
+    margin: 0;
+    font-size: 0.95rem;
+    font-weight: 700;
+    color: var(--accent-color);
+    border-bottom: 1px solid var(--border-color);
+    padding-bottom: 0.5rem;
+  }
+
+  .media-preview-box {
+    height: 100px;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    background: #09090b;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    position: relative;
+  }
+
+  .media-preview-box img.img-preview {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+
+  .no-media-text {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+  }
+
+  .file-info-text {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    background: rgba(0, 0, 0, 0.7);
+    color: #fff;
+    font-size: 0.7rem;
+    text-align: center;
+    padding: 2px 0;
+  }
+
+  .media-badge {
+    padding: 0.25rem 0.5rem;
+    border-radius: 4px;
+    font-size: 0.7rem;
+    font-weight: 700;
+    text-transform: uppercase;
+  }
+
+  .media-badge.video {
+    background: #e11d48;
+    color: #fff;
+  }
+
+  .media-upload-actions {
+    display: flex;
+    gap: 0.5rem;
+  }
+
+  .file-upload-btn {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    padding: 0.4rem;
+    cursor: pointer;
+    font-size: 0.8rem;
+    font-weight: 600;
+    text-align: center;
+    transition: background 0.2s;
+  }
+
+  .file-upload-btn:hover {
+    background: var(--border-color);
+  }
+
+  .file-upload-btn input[type="file"] {
+    display: none;
+  }
+
+  .clear-btn-red {
+    background: rgba(239, 68, 68, 0.1);
+    border: 1px solid rgba(239, 68, 68, 0.4);
+    color: #ef4444;
+    border-radius: 6px;
+    padding: 0.4rem 0.75rem;
+    cursor: pointer;
+    font-size: 0.8rem;
+    font-weight: 600;
+  }
+
+  .clear-btn-red:hover {
+    background: rgba(239, 68, 68, 0.2);
+  }
+
+  .form-group-horizontal {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+  }
+
+  .form-group-horizontal label {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+  }
+
+  .form-group-horizontal select {
+    background: var(--input-bg);
+    border: 1px solid var(--border-color);
+    color: var(--text-primary);
+    padding: 0.4rem 0.75rem;
+    border-radius: 6px;
+    font-size: 0.85rem;
+    min-width: 150px;
+  }
+
+  .obs-info-box {
+    margin-top: 0.5rem;
+    padding: 0.75rem;
+    background: rgba(16, 185, 129, 0.1);
+    border: 1px solid rgba(16, 185, 129, 0.3);
+    border-radius: 6px;
+    font-size: 0.75rem;
+  }
+
+  .obs-info-box p {
+    margin: 0 0 0.4rem 0;
+    font-weight: 600;
+    color: var(--accent-color);
+  }
+
+  .copy-url-row {
+    display: flex;
+    gap: 0.5rem;
+  }
+
+  .copy-url-row input {
+    flex: 1;
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    padding: 0.25rem 0.5rem;
+    color: var(--text-secondary);
+    font-size: 0.7rem;
+  }
+
+  .mini-copy-btn {
+    background: var(--accent-color);
+    border: none;
+    color: #fff;
+    border-radius: 4px;
+    padding: 0.25rem 0.75rem;
+    cursor: pointer;
+    font-size: 0.75rem;
+    font-weight: 600;
+  }
+
+  .remote-control-split {
+    display: flex;
+    gap: 1.5rem;
+    align-items: center;
+  }
+
+  .remote-info {
+    flex: 1;
+  }
+
+  .remote-info p {
+    margin: 0 0 0.5rem 0;
+    font-size: 0.85rem;
+    line-height: 1.5;
+  }
+
+  .remote-link {
+    color: var(--accent-color);
+    font-size: 0.9rem;
+    font-weight: 700;
+    word-break: break-all;
+  }
+
+  .qr-code-box {
+    background: #fff;
+    padding: 0.5rem;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .qr-code-img {
+    display: block;
+    width: 130px;
+    height: 130px;
+  }
+
+  /* Settings Subtab layout */
+  .settings-container {
+    padding: 1.5rem;
+    display: flex;
+    flex-direction: column;
+    gap: 1.25rem;
+    overflow-y: auto;
+    height: 100%;
+    box-sizing: border-box;
+  }
+
+  .settings-subtabs {
+    display: flex;
+    gap: 0.5rem;
+    border-bottom: 1px solid var(--border-color);
+    padding-bottom: 0.5rem;
+  }
+
+  .settings-subtabs button {
+    background: transparent;
+    border: none;
+    color: var(--text-secondary);
+    padding: 0.4rem 1rem;
+    cursor: pointer;
+    border-radius: 4px;
+    font-size: 0.85rem;
+    font-weight: 600;
+    transition: background 0.2s, color 0.2s;
+  }
+
+  .settings-subtabs button.active {
+    background: var(--accent-bg);
+    color: var(--accent-color);
+  }
+
+  .settings-subtab-content {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+  }
+
+  .settings-card {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+  }
+
+  .settings-card h5 {
+    margin: 0;
+    font-size: 0.95rem;
+    font-weight: 700;
+    color: var(--accent-color);
+    border-bottom: 1px solid var(--border-color);
+    padding-bottom: 0.5rem;
+  }
+
+  .settings-help {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    margin: 0;
+  }
+
+  .toggle-switch-btn {
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+    color: var(--text-primary);
+    padding: 0.4rem 1rem;
+    border-radius: 6px;
+    cursor: pointer;
+    font-weight: 600;
+    font-size: 0.85rem;
+    transition: background 0.2s;
+  }
+
+  .toggle-switch-btn:hover {
+    background: var(--border-color);
+  }
+
+  .font-search-row {
+    display: flex;
+    gap: 0.5rem;
+  }
+
+  .font-search-row input {
+    flex: 1;
+    background: var(--input-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    padding: 0.4rem 0.75rem;
+    color: var(--text-primary);
+    font-size: 0.85rem;
+  }
+
+  .loaded-fonts-list {
+    margin-top: 0.5rem;
+  }
+
+  .loaded-fonts-list h6 {
+    margin: 0 0 0.5rem 0;
+    font-size: 0.8rem;
+    font-weight: 700;
+    color: var(--text-secondary);
+  }
+
+  .chips-container {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+  }
+
+  .font-chip {
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+    border-radius: 20px;
+    padding: 0.25rem 0.75rem;
+    font-size: 0.75rem;
+    color: var(--text-primary);
+    font-weight: 500;
+  }
+
+  .db-stats-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1rem;
+    text-align: center;
+  }
+
+  .stat-item {
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+    padding: 0.75rem;
+    border-radius: 6px;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .stat-val {
+    font-size: 1.5rem;
+    font-weight: 800;
+    color: var(--accent-color);
+  }
+
+  .stat-lbl {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+  }
+
+  .backup-actions {
+    display: flex;
+    gap: 0.75rem;
+  }
+
+  .export-btn {
+    flex: 1;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+    color: var(--text-primary);
+    border-radius: 6px;
+    padding: 0.6rem;
+    cursor: pointer;
+    font-size: 0.85rem;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.4rem;
+    transition: background 0.2s, border-color 0.2s;
+  }
+
+  .export-btn:hover:not(:disabled) {
+    background: var(--accent-bg);
+    border-color: var(--accent-color);
+  }
+
+  .export-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
   }
 </style>

@@ -66,9 +66,21 @@ export const bookAbbreviationMap: Record<string, string> = {
   '1jn': '1 John', '1j': '1 John', '1 jn': '1 John', 'i jn': '1 John',
   '2jn': '2 John', '2j': '2 John', '2 jn': '2 John', 'ii jn': '2 John',
   '3jn': '3 John', '3j': '3 John', '3 jn': '3 John', 'iii jn': '3 John',
-  'jude': 'Jude', 'jud': 'Jude',
+  'jude': 'Jude', 'jde': 'Jude',
   'rev': 'Revelation', 're': 'Revelation', 'apoc': 'Revelation'
 };
+
+export const canonicalBooks = [
+  'Genesis', 'Exodus', 'Leviticus', 'Numbers', 'Deuteronomy', 'Joshua', 'Judges', 'Ruth',
+  '1 Samuel', '2 Samuel', '1 Kings', '2 Kings', '1 Chronicles', '2 Chronicles', 'Ezra', 'Nehemiah',
+  'Esther', 'Job', 'Psalms', 'Proverbs', 'Ecclesiastes', 'Song of Solomon', 'Isaiah', 'Jeremiah',
+  'Lamentations', 'Ezekiel', 'Daniel', 'Hosea', 'Joel', 'Amos', 'Obadiah', 'Jonah',
+  'Micah', 'Nahum', 'Habakkuk', 'Zephaniah', 'Haggai', 'Zechariah', 'Malachi',
+  'Matthew', 'Mark', 'Luke', 'John', 'Acts', 'Romans', '1 Corinthians', '2 Corinthians',
+  'Galatians', 'Ephesians', 'Philippians', 'Colossians', '1 Thessalonians', '2 Thessalonians',
+  '1 Timothy', '2 Timothy', 'Titus', 'Philemon', 'Hebrews', 'James', '1 Peter',
+  '2 Peter', '1 John', '2 John', '3 John', 'Jude', 'Revelation'
+];
 
 export interface parsedShortcut {
   bookName: string;
@@ -76,7 +88,10 @@ export interface parsedShortcut {
   verse?: number;
 }
 
-export function parseBibleShortcut(query: string, availableBooks: string[]): parsedShortcut | null {
+export function parseBibleShortcut(
+  query: string, 
+  availableBooks: Array<{ bookName: string; bookNum: number }>
+): parsedShortcut | null {
   const trimmed = query.trim().toLowerCase();
   // Match e.g. "ps 145 19", "ps 145:19", "mt 23", "1sam 3:4", "1 sam 3 4"
   const regex = /^([1-3]?\s*[a-zA-Z\s]+)\s+(\d+)(?:[\s:]+(\d+))?$/;
@@ -94,14 +109,26 @@ export function parseBibleShortcut(query: string, availableBooks: string[]): par
   let resolvedBookName = '';
 
   if (mappedName) {
-    resolvedBookName = availableBooks.find(b => b.toLowerCase() === mappedName.toLowerCase()) || '';
+    const canonicalIndex = canonicalBooks.findIndex(b => b.toLowerCase() === mappedName.toLowerCase());
+    const targetBookNum = canonicalIndex !== -1 ? canonicalIndex + 1 : -1;
+    if (targetBookNum !== -1) {
+      const foundBook = availableBooks.find(b => b.bookNum === targetBookNum);
+      if (foundBook) {
+        resolvedBookName = foundBook.bookName;
+      }
+    }
   }
 
+  // Fallback direct name match (e.g. searching local names directly: "ஆதியாகமம் 1")
   if (!resolvedBookName) {
-    resolvedBookName = availableBooks.find(b => {
-      const bLower = b.toLowerCase();
-      return bLower === rawBookPart || bLower === normalizedBook || bLower.startsWith(rawBookPart);
-    }) || '';
+    const foundBook = availableBooks.find(b => {
+      const bLower = b.bookName.toLowerCase();
+      const normName = bLower.replace(/\s+/g, '');
+      return bLower === rawBookPart || normName === normalizedBook || bLower.startsWith(rawBookPart);
+    });
+    if (foundBook) {
+      resolvedBookName = foundBook.bookName;
+    }
   }
 
   if (!resolvedBookName) return null;
