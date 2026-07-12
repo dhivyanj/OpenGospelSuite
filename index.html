@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>OpenGospelSuite</title>
+    <!-- Premium Google Fonts for presentation scaling -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Outfit:wght@500;600;700;800&display=swap" rel="stylesheet">
+    <script>
+      // Global error handlers to display crashes directly in the DOM
+      window.addEventListener('error', function(e) {
+        var errDiv = document.getElementById('debug-error');
+        if (!errDiv) {
+          errDiv = document.createElement('div');
+          errDiv.id = 'debug-error';
+          errDiv.style.color = '#ef4444';
+          errDiv.style.padding = '20px';
+          errDiv.style.background = '#1e1b4b';
+          errDiv.style.border = '2px solid #ef4444';
+          errDiv.style.position = 'fixed';
+          errDiv.style.bottom = '10px';
+          errDiv.style.left = '10px';
+          errDiv.style.right = '10px';
+          errDiv.style.zIndex = '99999';
+          errDiv.style.fontFamily = 'monospace';
+          document.body.appendChild(errDiv);
+        }
+        errDiv.innerHTML = '<h3>Uncaught Error:</h3><pre>' + e.message + '\nat ' + e.filename + ':' + e.lineno + ':' + e.colno + '</pre>';
+      });
+      window.addEventListener('unhandledrejection', function(e) {
+        var errDiv = document.getElementById('debug-error');
+        if (!errDiv) {
+          errDiv = document.createElement('div');
+          errDiv.id = 'debug-error';
+          errDiv.style.color = '#ef4444';
+          errDiv.style.padding = '20px';
+          errDiv.style.background = '#1e1b4b';
+          errDiv.style.border = '2px solid #ef4444';
+          errDiv.style.position = 'fixed';
+          errDiv.style.bottom = '10px';
+          errDiv.style.left = '10px';
+          errDiv.style.right = '10px';
+          errDiv.style.zIndex = '99999';
+          errDiv.style.fontFamily = 'monospace';
+          document.body.appendChild(errDiv);
+        }
+        errDiv.innerHTML = '<h3>Unhandled Rejection:</h3><pre>' + (e.reason && e.reason.stack ? e.reason.stack : e.reason) + '</pre>';
+      });
+    </script>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
